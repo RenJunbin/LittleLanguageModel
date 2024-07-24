@@ -76,28 +76,32 @@ class MultiHeadAttention(nn.Module):
     def __init__(self, num_heads, head_size):
         super().__init__()
         self.heads = nn.ModuleList([Head(head_size) for _ in range(num_heads)])
+        self.proj = nn.Linear(num_heads * head_size, n_embd)
     def forward(self, x):
-        return torch.cat([h(x) for h in self.heads], dim=-1)
+        out =  torch.cat([h(x) for h in self.heads], dim=-1)
+        out = self.proj(out)
+        return out
 
 class FeedForward(nn.Module):
     def __init__(self, n_embd):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(n_embd, n_embd),
+            nn.Linear(n_embd, 4 * n_embd),
             nn.ReLU(),
+            nn.Linear(4 * n_embd, n_embd),
         )
     def forward(self, x):
         return self.net(x)
 
-class Block(nn.MOdule):
-    def __iit__(self, n_embd, n_head):
+class Block(nn.Module):
+    def __init__(self, n_embd, n_head):
         super().__init__()
         head_size = n_embd // n_head
         self.sa = MultiHeadAttention(n_head, head_size)
         self.ffn = FeedForward(n_embd)
     def forward(self, x):
-        x = self.sa(x)
-        x = self.ffwd(x)
+        x = x + self.sa(x)
+        x = x + self.ffn(x)
         return x
 
 class BigramLanguageModel(nn.Module):
@@ -106,8 +110,11 @@ class BigramLanguageModel(nn.Module):
         super().__init__()
         self.token_embedding_table = nn.Embedding(vocab_size, n_embd)
         self.pos_embedding_table = nn.Embedding(block_size, n_embd)
-        self.sa_heads = MultiHeadAttention(4, n_embd//4)
-        self.ffn = FeedForward(n_embd)
+        self.blocks = nn.Sequential(
+            Block(n_embd, n_head=4),
+            Block(n_embd, n_head=4),
+            Block(n_embd, n_head=4),
+        )
         self.lm_head = nn.Linear(n_embd, vocab_size)
 
     def forward(self, idx, targets=None):
@@ -115,8 +122,7 @@ class BigramLanguageModel(nn.Module):
         tok_emb = self.token_embedding_table(idx)    # (B, T, C)
         pos_emb = self.pos_embedding_table(torch.arange(T, device=device))  # (T, C)
         x = tok_emb + pos_emb   # (B, T, C)
-        x = self.sa_heads(x)
-        x = self.ffn(x)
+        x = self.blocks(x)
         logits = self.lm_head(x)
 
         if targets is None:
